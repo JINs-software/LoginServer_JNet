@@ -1,3 +1,15 @@
+#### 구 버전 프로젝트
+
+구 버전 라이브러리인 CLanLibrary를 상속하여 구현한 LoginServer: https://github.com/JINs-software/LoginServer/tree/master
+
+성능 및 기능 7일 테스트는 구 버전의 프로젝트로 진행
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/94c10b75-1f2e-4191-8637-5edf9650285a" width="600">
+</p>
+
+---
+
 ### \[개요\]
 네트워크 라이브러리 제공 클래스(JNetServer, 구 CLanServer)를 상속받아 로그인 서버를 구현하는 것을 목표로 하였다. 로그인 서버의 필요성과 로그인 서버와 계정 DB 나아가 토큰 .....
 
@@ -52,7 +64,12 @@
 
 이 방식은 게임 서버의 로그인 서버로의 요청과 로그인 서버에서 게임 서버로의 응답이 필요하다. 조건(1)에 위배된다.
 
+<br></br>
+
 ---
+
+<br></br>
+
 ### \[로그인 서버 설계\]
 
 Redis와 같은 메모리 기반의 데이터베이스에 기반을 둔 '토큰 관리 서버'를 도입함으로써 인증 절차에서의 전제 조건을 만족시키는 설계를 세웠다.
