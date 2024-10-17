@@ -26,7 +26,6 @@ public:
 		BYTE packetCode_LAN,
 		uint32 numOfIocpConcurrentThrd, uint16 numOfIocpWorkerThrd,
 		size_t tlsMemPoolUnitCnt, size_t tlsMemPoolUnitCapacity,
-		bool tlsMemPoolMultiReferenceMode, bool tlsMemPoolPlacementNewMode,
 		uint32 memPoolBuffAllocSize,
 		uint32 sessionRecvBuffSize)
 		: m_LoginServer(loginserver),
@@ -35,7 +34,6 @@ public:
 			packetCode_LAN,
 			numOfIocpConcurrentThrd, numOfIocpWorkerThrd,
 			tlsMemPoolUnitCnt, tlsMemPoolUnitCapacity,
-			tlsMemPoolMultiReferenceMode, tlsMemPoolPlacementNewMode,
 			memPoolBuffAllocSize,
 			sessionRecvBuffSize,
 			false

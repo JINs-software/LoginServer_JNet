@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="sql">
+      <UniqueIdentifier>{9eb41a99-0238-4c43-94ed-7aef6540f97a}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="sql\_accountdb.sql">
+      <Filter>sql</Filter>
+    </None>
+    <None Include="sql\_Dummy_InsertQuery.sql">
+      <Filter>sql</Filter>
+    </None>
+  </ItemGroup>
+</Project>

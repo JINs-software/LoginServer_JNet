@@ -2,6 +2,31 @@
 #include "LoginServerMont.h"
 #include "CRedisConn.h"
 
+LoginServer::LoginServer(
+	int32 dbConnCnt, const WCHAR* odbcConnStr,
+	const char* serverIP, uint16 serverPort, uint16 maximumOfConnections,
+	PACKET_CODE packetCode_LAN, PACKET_CODE packetCode, PACKET_SYMM_KEY packetSymmetricKey,
+	bool recvBufferingMode,
+	uint16 maximumOfSessions,
+	uint32 numOfIocpConcurrentThrd, uint16 numOfIocpWorkerThrd,
+	size_t tlsMemPoolUnitCnt, size_t tlsMemPoolUnitCapacity,
+	uint32 memPoolBuffAllocSize,
+	uint32 sessionRecvBuffSize,
+	bool calcTpsThread
+	)
+	: JNetOdbcServer(
+		dbConnCnt, odbcConnStr,
+		serverIP, serverPort, maximumOfConnections,
+		packetCode_LAN, packetCode, packetSymmetricKey,
+		recvBufferingMode,
+		maximumOfSessions,
+		numOfIocpConcurrentThrd, numOfIocpWorkerThrd,
+		tlsMemPoolUnitCnt, tlsMemPoolUnitCapacity,
+		memPoolBuffAllocSize,
+		sessionRecvBuffSize,
+		calcTpsThread
+	), m_ServerStart(false), m_NumOfIOCPWorkers(numOfIocpWorkerThrd) {}
+
 bool LoginServer::Start()
 {
 	// Connect to Redis
@@ -31,12 +56,11 @@ bool LoginServer::Start()
 		MONT_SERVER_PROTOCOL_CODE,
 		MONT_CLIENT_IOCP_CONCURRENT_THRD, MONT_CLIENT_IOCP_WORKER_THRD_CNT,
 		MONT_CLIENT_MEM_POOL_UNIT_CNT, MONT_CLIENT_MEM_POOL_UNIT_CAPACITY,
-		false, false,
 		MONT_CLIENT_MEM_POOL_BUFF_ALLOC_SIZE,
 		MONT_CLIENT_RECV_BUFF_SIZE
 	);
     
-	if (!JNetServer::Start()) {
+	if (!JNetOdbcServer::Start()) {
 		return false;
 	}
 
@@ -62,6 +86,7 @@ void LoginServer::Stop()
 	}
 }
 
+/// @details 클라이언트 세션 ID, 주소 맵핑 자료구조 저장
 void LoginServer::OnClientJoin(UINT64 sessionID, const SOCKADDR_IN& clientSockAddr)
 {
 	m_ClientHostAddrMapMtx.lock();
@@ -114,7 +139,7 @@ void LoginServer::Proc_LOGIN_REQ(UINT64 sessionID, stMSG_LOGIN_REQ message)
 	resMessage.Status = dfLOGIN_STATUS_OK;
 
 	// DB 조회
-	if (!CheckSessionKey(message.AccountNo, message.SessionKey)) {
+	if (!CheckSessionKey(message.AccountNo/*, message.SessionKey*/)) {
 		resMessage.Status = dfLOGIN_STATUS_FAIL;
 		InterlockedIncrement64((int64*)&m_TotalLoginFailCnt);
 #if defined(ASSERT)
@@ -177,14 +202,14 @@ void LoginServer::Proc_LOGIN_REQ(UINT64 sessionID, stMSG_LOGIN_REQ message)
 
 
 	// 6. 클라이언트에 토큰 전송 (WSASend)
-	Proc_LOGIN_RES(sessionID, resMessage.AccountNo, 
+	Send_LOGIN_RES(sessionID, resMessage.AccountNo, 
 		resMessage.Status, resMessage.ID, resMessage.Nickname, 
 		resMessage.GameServerIP, resMessage.GameServerPort, 
 		resMessage.ChatServerIP, resMessage.ChatServerPort
 	);
 }
 
-void LoginServer::Proc_LOGIN_RES(UINT64 sessionID, INT64 accountNo, BYTE status, const WCHAR* id, const WCHAR* nickName, const WCHAR* gameserverIP, USHORT gameserverPort, const WCHAR* chatserverIP, USHORT chatserverPort)
+void LoginServer::Send_LOGIN_RES(UINT64 sessionID, INT64 accountNo, BYTE status, const WCHAR* id, const WCHAR* nickName, const WCHAR* gameserverIP, USHORT gameserverPort, const WCHAR* chatserverIP, USHORT chatserverPort)
 {
 	JBuffer* reply = AllocSerialSendBuff(sizeof(WORD) + sizeof(INT64) + sizeof(BYTE) + sizeof(WCHAR[20]) + sizeof(WCHAR[20]) + sizeof(WCHAR[16]) + sizeof(USHORT) + sizeof(WCHAR[16]) + sizeof(USHORT));
 	(*reply) << (WORD)en_PACKET_CS_LOGIN_RES_LOGIN << accountNo << status;
@@ -200,7 +225,7 @@ void LoginServer::Proc_LOGIN_RES(UINT64 sessionID, INT64 accountNo, BYTE status,
 	++m_AuthTransaction;
 }
 
-bool LoginServer::CheckSessionKey(INT64 accountNo, const char* sessionKey)
+bool LoginServer::CheckSessionKey(INT64 accountNo/*, const char* sessionKey*/)
 {
 	/***************************************
 	* DB 커넥션 타임아웃에 대비한 코드로 변경

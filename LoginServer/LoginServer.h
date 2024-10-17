@@ -10,7 +10,7 @@ namespace RedisCpp {
 	class CRedisConn;
 }
 
-class LoginServer : public JNetOdbcServer	// -> JNetOdbcServer
+class LoginServer : public JNetOdbcServer	
 {
 private:
 	bool							m_ServerStart;			// Stop 호출 시 플래그 on, Stop 호출 없이 서버 객체 소멸자 호출 시 Stop 함수 호출(정리 작업)
@@ -61,48 +61,34 @@ public:
 		uint16 maximumOfSessions,
 		uint32 numOfIocpConcurrentThrd, uint16 numOfIocpWorkerThrd,
 		size_t tlsMemPoolUnitCnt, size_t tlsMemPoolUnitCapacity,
-		bool tlsMemPoolMultiReferenceMode, bool tlsMemPoolPlacementNewMode,
 		uint32 memPoolBuffAllocSize,
 		uint32 sessionRecvBuffSize,
 		bool calcTpsThread
-	) : JNetOdbcServer(
-		dbConnCnt, odbcConnStr,
-		serverIP, serverPort, maximumOfConnections,
-		packetCode_LAN, packetCode, packetSymmetricKey,
-		recvBufferingMode,
-		maximumOfSessions,
-		numOfIocpConcurrentThrd, numOfIocpWorkerThrd,
-		tlsMemPoolUnitCnt, tlsMemPoolUnitCapacity,
-		tlsMemPoolMultiReferenceMode, tlsMemPoolPlacementNewMode,
-		memPoolBuffAllocSize,
-		sessionRecvBuffSize,
-		calcTpsThread
-	)
-	{}
+	);
 
 	bool Start();
 	void Stop();
 	bool ServerStop() { return !m_ServerStart; }
 
-protected:
-	// 로그인 서버 접속 클라이언트 연결
-	// - LoginServerMont::IncrementSessionCount() 호출
+private:
+	/// @brief 로그인 서버 접속 클라이언트 연결
+	// - call LoginServerMont::IncrementSessionCount()
 	virtual void OnClientJoin(UINT64 sessionID, const SOCKADDR_IN& clientSockAddr) override;
-
-	// 로그인 서버 접속 클라이언트 연결 종료
-	// - DecrementSessionCount
+	/// @brief 로그인 서버 접속 클라이언트 연결 종료
+	// - call LoginServerMont::DecrementSessionCount() 
 	virtual void OnClientLeave(UINT64 sessionID) override;
-
-	// 로그인 서버 연결 -> 로그인 요청 패킷 전송 (OnClientJoin부터 최초 OnRecv까지의 타임 아웃 발동 필요)
+	/// @brief 로그인 요청 패킷 수신 처리 -> Proc_LOGIN_REQ(..) 
+	/// @todo 로그인 서버 연결(OnClientJoint) ~ 로그인 요청 패킷 수신(OnRecv)까지 시간 측정 및 필요 시 타임 아웃 발동 기능
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff);
 
-	// 메시지 처리
+	/// @brief 로그인 요청 메시지 처리, (1) DB 조회 및 (2) 토큰 생성 그리고 (3) 토큰 전달 작업을 동기 방식으로 수행 (다수의 IOCP 작업자 스레드)
 	void Proc_LOGIN_REQ(UINT64, stMSG_LOGIN_REQ);
-	void Proc_LOGIN_RES(UINT64, INT64 accountNo, BYTE status, const WCHAR* id, const WCHAR* nickName, const WCHAR* gameserverIP, USHORT gameserverPort, const WCHAR* chatserverIP, USHORT chatserverPort);
+	/// @brief 로그인 요청에 대한 응답
+	void Send_LOGIN_RES(UINT64, INT64 accountNo, BYTE status, const WCHAR* id, const WCHAR* nickName, const WCHAR* gameserverIP, USHORT gameserverPort, const WCHAR* chatserverIP, USHORT chatserverPort);
 
 private:
 	// DB 접근
-	bool CheckSessionKey(INT64 accountNo, const char* sessionKey);
+	bool CheckSessionKey(INT64 accountNo/*, const char* sessionKey*/);
 	bool GetAccountInfo(INT64 accountNo, WCHAR* ID, WCHAR* Nickname);
 
 	// Redis 접근
