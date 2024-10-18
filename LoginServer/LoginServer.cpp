@@ -30,6 +30,7 @@ LoginServer::LoginServer(
 bool LoginServer::Start()
 {
 	// Connect to Redis
+#if defined(MOW_LOGIN_SERVER_MODE) && !defined(MOW_TEST)
 	bool firstConn = true;
 	for (uint16 i = 0; i < m_NumOfIOCPWorkers; i++) {
 		RedisCpp::CRedisConn* redisConn = new RedisCpp::CRedisConn();	// 형식 지정자가 필요합니다.
@@ -50,6 +51,7 @@ bool LoginServer::Start()
 
 		m_RedisConnPool.Enqueue(redisConn);
 	}
+#endif
 
 	m_ServerMont = new LoginServerMont(this,
 		MONT_SERVER_IP, MONT_SERVER_PORT,
@@ -61,6 +63,7 @@ bool LoginServer::Start()
 	);
     
 	if (!JNetOdbcServer::Start()) {
+		cout << "JNetOdbcServer's Start() returns False!" << endl;
 		return false;
 	}
 
@@ -87,7 +90,7 @@ void LoginServer::Stop()
 }
 
 /// @details 클라이언트 세션 ID, 주소 맵핑 자료구조 저장
-void LoginServer::OnClientJoin(UINT64 sessionID, const SOCKADDR_IN& clientSockAddr)
+void LoginServer::OnClientJoin(SessionID64 sessionID, const SOCKADDR_IN& clientSockAddr)
 {
 	m_ClientHostAddrMapMtx.lock();
 	if (m_ClientHostAddrMap.find(sessionID) != m_ClientHostAddrMap.end()) {
@@ -101,7 +104,7 @@ void LoginServer::OnClientJoin(UINT64 sessionID, const SOCKADDR_IN& clientSockAd
 	m_ClientHostAddrMapMtx.unlock();
 }
 
-void LoginServer::OnClientLeave(UINT64 sessionID)
+void LoginServer::OnClientLeave(SessionID64 sessionID)
 {
 	m_ClientHostAddrMapMtx.lock();
 	if (m_ClientHostAddrMap.find(sessionID) == m_ClientHostAddrMap.end()) {
@@ -116,8 +119,31 @@ void LoginServer::OnClientLeave(UINT64 sessionID)
 	m_ClientHostAddrMapMtx.unlock();
 }
 
-void LoginServer::OnRecv(UINT64 sessionID, JBuffer& recvBuff)
+void LoginServer::OnRecv(SessionID64 sessionID, JBuffer& recvBuff)
 {
+#if defined(MOW_LOGIN_SERVER_MODE)
+	while (recvBuff.GetUseSize() >= sizeof(uint16)) {
+		uint16 type;
+		recvBuff.Peek(&type);
+
+		if (type == enPacketType::REQ_CREATE_ACCOUNT) {
+			// 계정 생성 요청
+			stMSG_REQ_CREATE_ACCOUNT msg;
+			recvBuff >> msg;
+
+			Proc_REQ_Create_Account(sessionID, msg);		// 1. 계정 DB 접근 및 계정 정보 확인
+		}
+		else if (type == enPacketType::REQ_LOGIN) {
+			stMSG_REQ_LOGIN msg;
+			recvBuff >> msg;
+
+			Proc_REQ_Login(sessionID, msg);
+		}
+		else {
+			DebugBreak();
+		}
+	}
+#else
 	while (recvBuff.GetUseSize() >= sizeof(WORD)) {
 		WORD type;
 		recvBuff.Peek(&type);
@@ -129,9 +155,113 @@ void LoginServer::OnRecv(UINT64 sessionID, JBuffer& recvBuff)
 			Proc_LOGIN_REQ(sessionID, message);		// 1. 계정 DB 접근 및 계정 정보 확인
 		}
 	}
+#endif
 }
 
-void LoginServer::Proc_LOGIN_REQ(UINT64 sessionID, stMSG_LOGIN_REQ message)
+
+#if defined(MOW_LOGIN_SERVER_MODE)
+void LoginServer::Proc_REQ_Create_Account(SessionID64 sessionID, const stMSG_REQ_CREATE_ACCOUNT& msg)
+{
+#if !defined(MOW_TEST)
+	// 동일한 계정 확인
+	if (CheckForAccountID(msg.AccountID)) {
+		// ID 중복
+		Send_RES_Create_Account(sessionID, enReplyCode::CRETAE_ACCOUNT_FAILURE);
+	}
+	else {
+		if (InsertNewAccount(msg.AccountID, msg.AccountPassword)) {
+			Send_RES_Create_Account(sessionID, enReplyCode::CRETAE_ACCOUNT_SUCCESS);
+		}
+		else {
+			Send_RES_Create_Account(sessionID, enReplyCode::CRETAE_ACCOUNT_FAILURE);
+		}
+	}
+#else
+	WCHAR accountID[MAX_OF_ACCOUNT_ID_LENGTH] = { NULL, };
+	memcpy(accountID, msg.AccountID, msg.AccountIdLen);
+	WCHAR accountPassword[MAX_OF_ACCOUNT_PASSWORD_LENGTH] = { NULL, };
+	memcpy(accountPassword, msg.AccountPassword, msg.AccountPasswordLen);
+
+	wstring accountID_wstr = accountID;
+	wstring accountPW_wstr = accountPassword;
+	if (AccountDB_Test.find(accountID_wstr) == AccountDB_Test.end()) {
+		AccountDB_Test.insert({ accountID_wstr, accountPW_wstr });
+		Send_RES_Create_Account(sessionID, enReplyCode::CRETAE_ACCOUNT_SUCCESS);
+	}
+	else {
+		Send_RES_Create_Account(sessionID, enReplyCode::CRETAE_ACCOUNT_FAILURE);
+	}
+#endif
+}
+
+void LoginServer::Send_RES_Create_Account(SessionID64 sessionID, uint16 replyCode)
+{
+	JBuffer* reply = AllocSerialSendBuff(sizeof(stMSG_RES_CREATE_ACCOUNT));
+	*reply << (uint16)enPacketType::REPLY_CREATE_ACCOUNT;
+	*reply << replyCode;
+
+	if (!SendPacket(sessionID, reply)) {
+		FreeSerialBuff(reply);
+	}
+}
+
+void LoginServer::Proc_REQ_Login(SessionID64 sessionID, const stMSG_REQ_LOGIN& msg)
+{
+#if !defined(MOW_TEST)
+	// 계정 ID 존재 여부 확인
+	if (!CheckForAccountID(msg.AccountID)) {
+		// ID 존재 X
+		Send_RES_Login(sessionID, enReplyCode::LOGIN_FAILURE, L"");
+	}
+	else {
+		wchar_t password[MAX_OF_ACCOUNT_PASSWORD_LENGTH] = { NULL, };
+		GetAccountPassword(msg.AccountID, password);
+		if (memcmp(msg.AccountPassword, password, sizeof(password)) != 0) {
+			Send_RES_Login(sessionID, enReplyCode::LOGIN_FAILURE, L"");
+		}
+		else {
+			Send_RES_Login(sessionID, enReplyCode::LOGIN_SUCCESS, L"123");
+		}
+	}
+#else
+	WCHAR accountID[MAX_OF_ACCOUNT_ID_LENGTH] = { NULL, };
+	memcpy(accountID, msg.AccountID, msg.AccountIdLen);
+	WCHAR accountPassword[MAX_OF_ACCOUNT_PASSWORD_LENGTH] = { NULL, };
+	memcpy(accountPassword, msg.AccountPassword, msg.AccountPasswordLen);
+
+	wstring accountID_wstr = accountID;
+	wstring accountPW_wstr = accountPassword;
+	if (AccountDB_Test.find(accountID_wstr) != AccountDB_Test.end()) {
+		// 토큰 발급
+		wstring token = L"temp token";
+
+		// 
+		Send_RES_Login(sessionID, enReplyCode::LOGIN_SUCCESS, token);
+	}
+	else {
+		Send_RES_Login(sessionID, enReplyCode::LOGIN_FAILURE, L"");
+	}
+#endif
+}
+
+void LoginServer::Send_RES_Login(SessionID64 sessionID, uint16 replyCode, const wstring& token)
+{
+	static uint16 s_AccountNoIncrement = 0;
+
+	JBuffer* reply = AllocSerialSendBuff(sizeof(stMSG_RES_LOGIN));
+	*reply << (uint16)enPacketType::REPLY_LOGIN;
+	*reply << replyCode;
+	reply->Enqueue((BYTE*)token.c_str(), TOKEN_LENGTH * sizeof(WCHAR));
+	*reply << (int32)token.size();
+	*reply << s_AccountNoIncrement++;
+
+	if (!SendPacket(sessionID, reply)) {
+		FreeSerialBuff(reply);
+	}
+}
+
+#else
+void LoginServer::Proc_LOGIN_REQ(SessionID64 sessionID, const stMSG_LOGIN_REQ& message)
 {
 	stMSG_LOGIN_RES resMessage;
 	memset(&resMessage, 0, sizeof(resMessage));
@@ -209,7 +339,7 @@ void LoginServer::Proc_LOGIN_REQ(UINT64 sessionID, stMSG_LOGIN_REQ message)
 	);
 }
 
-void LoginServer::Send_LOGIN_RES(UINT64 sessionID, INT64 accountNo, BYTE status, const WCHAR* id, const WCHAR* nickName, const WCHAR* gameserverIP, USHORT gameserverPort, const WCHAR* chatserverIP, USHORT chatserverPort)
+void LoginServer::Send_LOGIN_RES(SessionID64 sessionID, INT64 accountNo, BYTE status, const WCHAR* id, const WCHAR* nickName, const WCHAR* gameserverIP, USHORT gameserverPort, const WCHAR* chatserverIP, USHORT chatserverPort)
 {
 	JBuffer* reply = AllocSerialSendBuff(sizeof(WORD) + sizeof(INT64) + sizeof(BYTE) + sizeof(WCHAR[20]) + sizeof(WCHAR[20]) + sizeof(WCHAR[16]) + sizeof(USHORT) + sizeof(WCHAR[16]) + sizeof(USHORT));
 	(*reply) << (WORD)en_PACKET_CS_LOGIN_RES_LOGIN << accountNo << status;
@@ -224,6 +354,165 @@ void LoginServer::Send_LOGIN_RES(UINT64 sessionID, INT64 accountNo, BYTE status,
 
 	++m_AuthTransaction;
 }
+#endif
+
+#if defined(MOW_LOGIN_SERVER_MODE)
+bool LoginServer::CheckForAccountID(const wchar_t* accountID)
+{
+	bool ret;
+	JNetDBConn* dbConn;
+	bool dbProcSuccess = false;
+	while (!dbProcSuccess) {
+		// 1. DB 커넥션 할당
+		while ((dbConn = HoldDBConnection()) == NULL);	// DBConnection 획득까지 polling
+
+		// 2. 이전 바인딩 해제
+		UnBind(dbConn);
+
+		// 3. 첫 번째 파라미터로 계정 번호 바인딩
+		//if (BindParameter(dbConn, 1, accountID)) {
+		//	// 4. 쿼리 실행
+		//	if (!ExecQuery(dbConn, Query_AccountId)) {
+		//		FreeDBConnection(dbConn, true, true);
+		//		continue;
+		//	}
+		//	else {
+		//		if (GetRowCount(dbConn) > 0) { ret = true; }
+		//		else { ret = false; }
+		//		dbProcSuccess = true;
+		//	}
+		//}
+		// => 이 코드는 잘못된 버퍼 길이로 전달된다. 이유 분석 후 JNetODBC 함수 변경
+		if (dbConn->BindParam(1, accountID)) {
+			if (!dbConn->Execute(Query_AccountId)) {
+				FreeDBConnection(dbConn, true, true);
+				continue;
+			}
+			else {
+				if (GetRowCount(dbConn) > 0) { ret = true; }
+				else { ret = false; }
+				dbProcSuccess = true;
+			}
+		}
+		else {
+			DebugBreak();
+		}
+
+		FreeDBConnection(dbConn);
+	}
+
+	return ret;
+}
+
+bool LoginServer::InsertNewAccount(const wchar_t* accountID, const wchar_t* password)
+{
+	bool ret;
+	JNetDBConn* dbConn;
+	bool dbProcSuccess = false;
+	while (!dbProcSuccess) {
+		// 1. DB 커넥션 할당
+		while ((dbConn = HoldDBConnection()) == NULL);	// DBConnection 획득까지 polling
+
+		// 2. 이전 바인딩 해제
+		UnBind(dbConn);
+
+		//if (BindParameter(dbConn, 1, accountID) && BindParameter(dbConn, 2, password)) {
+		//	if (!ExecQuery(dbConn, Query_InsertNewAccount)) {
+		//		FreeDBConnection(dbConn, true, true);
+		//		continue;
+		//	}
+		//	else {
+		//		if (GetRowCount(dbConn) > 0) { ret = true; }
+		//		else { ret = false; }
+		//		dbProcSuccess = true;
+		//	}
+		//}
+
+		if (dbConn->BindParam(1, accountID) && dbConn->BindParam(2, password)) {
+			if (!dbConn->Execute(Query_InsertNewAccount)) {
+				FreeDBConnection(dbConn, true, true);
+				continue;
+			}
+			else {
+				if (GetRowCount(dbConn) > 0) { ret = true; }
+				else { ret = false; }
+				dbProcSuccess = true;
+			}
+		}
+		else {
+			DebugBreak();
+		}
+
+		FreeDBConnection(dbConn);
+	}
+
+	return ret;
+}
+
+bool LoginServer::GetAccountPassword(const wchar_t* accountID, wchar_t* password_out)
+{
+	bool ret;
+	JNetDBConn* dbConn;
+	bool dbProcSuccess = false;
+	while (!dbProcSuccess) {
+		// 1. DB 커넥션 할당
+		while ((dbConn = HoldDBConnection()) == NULL);	// DBConnection 획득까지 polling
+
+		// 2. 이전 바인딩 해제
+		UnBind(dbConn);
+
+		// 3. 첫 번째 파라미터로 계정 번호 바인딩
+		//if (BindParameter(dbConn, 1, accountID)) {
+		//	// 4. 쿼리 실행
+		//	if (!ExecQuery(dbConn, Query_AccountPassword)) {
+		//		FreeDBConnection(dbConn, true, true);
+		//		continue;
+		//	}
+		//	else {
+		//		WCHAR password[MAX_OF_ACCOUNT_PASSWORD_LENGTH];
+		//		BindColumn(dbConn, 1, password, sizeof(password), NULL);
+		//
+		//		if (!dbConn->Fetch()) { ret = false;  }
+		//		else {
+		//			ret = true;
+		//			memcpy(password_out, password, sizeof(password));
+		//		}
+		//		dbProcSuccess = true;
+		//	}
+		//}
+
+		if (dbConn->BindParam(1, accountID)) {
+			// 4. 쿼리 실행
+			if (!dbConn->Execute(Query_AccountPassword)) {
+				FreeDBConnection(dbConn, true, true);
+				continue;
+			}
+			else {
+				WCHAR password[MAX_OF_ACCOUNT_PASSWORD_LENGTH];
+				dbConn->BindCol(1, password, sizeof(password), NULL);
+
+				if (!dbConn->Fetch()) { ret = false; }
+				else {
+					ret = true;
+					memcpy(password_out, password, sizeof(password));
+				}
+				dbProcSuccess = true;
+			}
+		}
+
+		FreeDBConnection(dbConn);
+	}
+
+	return ret;
+}
+
+bool LoginServer::InsertSessionKeyToRedis(const wchar_t* accountID, const wchar_t* token)
+{
+	DebugBreak();
+	return false;
+}
+
+#else
 
 bool LoginServer::CheckSessionKey(INT64 accountNo/*, const char* sessionKey*/)
 {
@@ -331,6 +620,9 @@ bool LoginServer::InsertSessionKeyToRedis(INT64 accountNo, const char* sessionKe
 	m_RedisConnPool.Enqueue(redisConn);
 	return ret;
 }
+
+#endif
+
 
 #if defined(CONNECT_TIMEOUT_CHECK_SET)
 UINT __stdcall LoginServer::TimeOutCheckThreadFunc(void* arg)

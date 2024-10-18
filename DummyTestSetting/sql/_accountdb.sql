@@ -1,4 +1,4 @@
-CREATE DATABASE `accountdb` IF NOT EXIST 'accountDB';
+CREATE DATABASE IF NOT EXISTS 'accountDB';
 
 CREATE TABLE IF NOT EXISTS `accountdb`.`account` (
 	`accountno` BIGINT NOT NULL AUTO_INCREMENT,

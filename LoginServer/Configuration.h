@@ -1,11 +1,14 @@
 #pragma once
 
+/***********************************************
+* 'MarchOfWind' GameServer or Dummy Test Mode
+************************************************/
+#define MOW_LOGIN_SERVER_MODE
+#define MOW_TEST
+
 //#define ASSERT
-
 #define CONNECT_TO_MONITORING_SERVER
-
 //#define	CONNECT_TIMEOUT_CHECK_SET
-
 //#define DELEY_TIME_CHECK
 
 #define RECV_BUFFERING_MODE					false
@@ -29,6 +32,8 @@
 #define LOGIN_SERVER_PROTOCOL_CODE			119
 /// @def 로그인 서버 패킷 코드 (패킷 En/Decode 시 사용되는 서버-클라 대칭키)
 #define LOGIN_SERVER_PACKET_CODE			50
+/// @def 수신 버퍼링 모드
+#define LOGIN_RECV_BUFFERING_MODE			false
 /// @def 로그인 서버 IOCP 'Concurrent thread' 인수
 #define NUM_OF_IOCP_CONCURRENT_THREAD		2		
 /// @def 로그인 서버 IOCP 작업자 스레드 갯수

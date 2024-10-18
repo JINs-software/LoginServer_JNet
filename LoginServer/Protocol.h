@@ -1,6 +1,74 @@
 #pragma once
 #include <minwindef.h>
+#include "Configuration.h"
 
+#if defined(MOW_LOGIN_SERVER_MODE)
+#define MAX_OF_ACCOUNT_ID_LENGTH		20
+#define MAX_OF_ACCOUNT_PASSWORD_LENGTH	20
+#define TOKEN_LENGTH					20
+
+enum enPacketType {
+	LOGIN_PACKET_TYPE = 10000,
+	REQ_CREATE_ACCOUNT,
+	REPLY_CREATE_ACCOUNT,
+	REQ_LOGIN,
+	REPLY_LOGIN,
+
+	en_PACKET_SS_MONITOR = 20000,
+	en_PACKET_SS_MONITOR_LOGIN,
+	en_PACKET_SS_MONITOR_DATA_UPDATE,
+	en_PACKET_CS_MONITOR = 25000,
+	en_PACKET_CS_MONITOR_TOOL_REQ_LOGIN,
+	en_PACKET_CS_MONITOR_TOOL_RES_LOGIN,
+	en_PACKET_CS_MONITOR_TOOL_DATA_UPDATE
+};
+
+enum enReplyCode {
+	CRETAE_ACCOUNT_SUCCESS,
+	CRETAE_ACCOUNT_FAILURE,
+
+	LOGIN_SUCCESS,
+	LOGIN_FAILURE,
+};
+
+#pragma pack(push, 1)
+struct stMSG_REQ_CREATE_ACCOUNT {
+	UINT16	Type;
+	WCHAR	AccountID[MAX_OF_ACCOUNT_ID_LENGTH];
+	INT32	AccountIdLen;
+	WCHAR	AccountPassword[MAX_OF_ACCOUNT_PASSWORD_LENGTH];
+	INT32	AccountPasswordLen;
+};
+struct stMSG_RES_CREATE_ACCOUNT {
+	UINT16	Type;
+	UINT16	ReplyCode;
+};
+
+struct stMSG_REQ_LOGIN {
+	UINT16	Type;
+	WCHAR	AccountID[MAX_OF_ACCOUNT_ID_LENGTH];
+	INT32	AccountIdLen;
+	WCHAR	AccountPassword[MAX_OF_ACCOUNT_PASSWORD_LENGTH];
+	INT32	AccountPasswordLen;
+};
+struct stMSG_RES_LOGIN {
+	UINT16	Type;
+	UINT16	ReplyCode;
+	WCHAR	Token[TOKEN_LENGTH];
+	INT32	TokenLength;
+	UINT16	AccountNo;
+};
+
+struct stMSG_MONITOR_DATA_UPDATE {
+	WORD	Type;
+	BYTE	DataType;
+	int		DataValue;
+	int		TimeStamp;
+
+};
+#pragma pack(pop)
+
+#else
 #pragma pack(push, 1)
 struct stMSG_LOGIN_REQ
 {
@@ -33,7 +101,6 @@ struct stMSG_MONITOR_DATA_UPDATE {
 
 };
 #pragma pack(pop)
-
 
 enum en_PACKET_TYPE
 {
@@ -309,6 +376,7 @@ enum en_PACKET_SS_HEARTBEAT
 	dfTHREAD_TYPE_DB = 2,
 	dfTHREAD_TYPE_GAME = 3,
 };
+#endif
 
 enum en_PACKET_SS_MONITOR_DATA_UPDATE
 {
