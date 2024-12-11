@@ -2,6 +2,12 @@
 #include "LoginServerMont.h"
 #include "CRedisConn.h"
 
+#include <cwchar>
+#include <random>
+#include <ctime>
+
+#include <codecvt>
+
 LoginServer::LoginServer(
 	int32 dbConnCnt, const WCHAR* odbcConnStr,
 	const char* serverIP, uint16 serverPort, uint16 maximumOfConnections,
@@ -78,6 +84,14 @@ void LoginServer::Stop()
 	if (m_ServerStart) {
 		m_ServerStart = false;
 		JNetServer::Stop();
+
+		RedisCpp::CRedisConn* redisConn = NULL;
+		m_RedisConnPool.Dequeue(redisConn);
+		if (redisConn != NULL) {
+			uint32 retval;
+			redisConn->flushall(retval);
+			delete redisConn;
+		}
 
 		while (m_RedisConnPool.GetSize() > 0) {
 			RedisCpp::CRedisConn* redisConn = NULL;
@@ -160,9 +174,12 @@ void LoginServer::OnRecv(SessionID64 sessionID, JBuffer& recvBuff)
 
 
 #if defined(MOW_LOGIN_SERVER_MODE)
-void LoginServer::Proc_REQ_Create_Account(SessionID64 sessionID, const stMSG_REQ_CREATE_ACCOUNT& msg)
+void LoginServer::Proc_REQ_Create_Account(SessionID64 sessionID, stMSG_REQ_CREATE_ACCOUNT& msg)
 {
 #if !defined(MOW_TEST)
+	msg.AccountID[msg.AccountIdLen] = NULL;
+	msg.AccountPassword[msg.AccountPasswordLen] = NULL;
+
 	// 동일한 계정 확인
 	if (CheckForAccountID(msg.AccountID)) {
 		// ID 중복
@@ -205,22 +222,35 @@ void LoginServer::Send_RES_Create_Account(SessionID64 sessionID, uint16 replyCod
 	}
 }
 
-void LoginServer::Proc_REQ_Login(SessionID64 sessionID, const stMSG_REQ_LOGIN& msg)
+void LoginServer::Proc_REQ_Login(SessionID64 sessionID, stMSG_REQ_LOGIN& msg)
 {
 #if !defined(MOW_TEST)
+	msg.AccountID[msg.AccountIdLen] = NULL;
+	msg.AccountPassword[msg.AccountPasswordLen] = NULL;
+
+	wchar_t token[TOKEN_LENGTH + 1] = { NULL, };
+
 	// 계정 ID 존재 여부 확인
 	if (!CheckForAccountID(msg.AccountID)) {
 		// ID 존재 X
-		Send_RES_Login(sessionID, enReplyCode::LOGIN_FAILURE, L"");
+		Send_RES_Login(sessionID, enReplyCode::LOGIN_FAILURE, token);
 	}
 	else {
 		wchar_t password[MAX_OF_ACCOUNT_PASSWORD_LENGTH] = { NULL, };
 		GetAccountPassword(msg.AccountID, password);
-		if (memcmp(msg.AccountPassword, password, sizeof(password)) != 0) {
-			Send_RES_Login(sessionID, enReplyCode::LOGIN_FAILURE, L"");
+		size_t passwordLen = wcslen(password);
+
+		if (memcmp(msg.AccountPassword, password, passwordLen * sizeof(wchar_t)) != 0) {
+			Send_RES_Login(sessionID, enReplyCode::LOGIN_FAILURE, token);
 		}
 		else {
-			Send_RES_Login(sessionID, enReplyCode::LOGIN_SUCCESS, L"123");
+			GenerateRandomToken(token);
+			if (InsertSessionKeyToRedis(msg.AccountID, token)) {
+				Send_RES_Login(sessionID, enReplyCode::LOGIN_SUCCESS, token);
+			}
+			else {
+				Send_RES_Login(sessionID, enReplyCode::LOGIN_FAILURE, token);
+			}
 		}
 	}
 #else
@@ -244,21 +274,39 @@ void LoginServer::Proc_REQ_Login(SessionID64 sessionID, const stMSG_REQ_LOGIN& m
 #endif
 }
 
-void LoginServer::Send_RES_Login(SessionID64 sessionID, uint16 replyCode, const wstring& token)
+void LoginServer::Send_RES_Login(SessionID64 sessionID, uint16 replyCode, WCHAR token[TOKEN_LENGTH])
 {
 	static uint16 s_AccountNoIncrement = 0;
 
 	JBuffer* reply = AllocSerialSendBuff(sizeof(stMSG_RES_LOGIN));
 	*reply << (uint16)enPacketType::REPLY_LOGIN;
 	*reply << replyCode;
-	reply->Enqueue((BYTE*)token.c_str(), TOKEN_LENGTH * sizeof(WCHAR));
-	*reply << (int32)token.size();
+	reply->Enqueue((BYTE*)token, TOKEN_LENGTH * sizeof(WCHAR));
+	*reply << TOKEN_LENGTH;
+	//reply->Enqueue((BYTE*)token.c_str(), TOKEN_LENGTH * sizeof(WCHAR));
+	//*reply << (int32)token.size();
 	*reply << s_AccountNoIncrement++;
 
 	if (!SendPacket(sessionID, reply)) {
 		FreeSerialBuff(reply);
 	}
 }
+
+//void LoginServer::Send_RES_Login(SessionID64 sessionID, uint16 replyCode, const wstring& token)
+//{
+//	static uint16 s_AccountNoIncrement = 0;
+//
+//	JBuffer* reply = AllocSerialSendBuff(sizeof(stMSG_RES_LOGIN));
+//	*reply << (uint16)enPacketType::REPLY_LOGIN;
+//	*reply << replyCode;
+//	reply->Enqueue((BYTE*)token.c_str(), TOKEN_LENGTH * sizeof(WCHAR));
+//	*reply << (int32)token.size();
+//	*reply << s_AccountNoIncrement++;
+//
+//	if (!SendPacket(sessionID, reply)) {
+//		FreeSerialBuff(reply);
+//	}
+//}
 
 #else
 void LoginServer::Proc_LOGIN_REQ(SessionID64 sessionID, const stMSG_LOGIN_REQ& message)
@@ -506,10 +554,36 @@ bool LoginServer::GetAccountPassword(const wchar_t* accountID, wchar_t* password
 	return ret;
 }
 
+void LoginServer::GenerateRandomToken(wchar_t token[TOKEN_LENGTH])
+{
+	static const wchar_t charset[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+	static const size_t charsetSize = sizeof(charset) / sizeof(wchar_t);
+
+	std::mt19937 rng(static_cast<unsigned>(time(nullptr)));			// 랜덤 시드 설정
+	std::uniform_int_distribution<size_t> dist(0, charsetSize);				// 유효한 문자 범위
+
+	for (size_t i = 0; i < TOKEN_LENGTH; ++i) {
+		token[i] = charset[dist(rng)];
+	}
+}
+
 bool LoginServer::InsertSessionKeyToRedis(const wchar_t* accountID, const wchar_t* token)
 {
-	DebugBreak();
-	return false;
+	bool ret = false;
+
+	wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+	string accountIdStr = converter.to_bytes(accountID);
+	string tokenStr = converter.to_bytes(token);
+
+	uint32 retval;
+	RedisCpp::CRedisConn* redisConn = NULL;
+	if (m_RedisConnPool.Dequeue(redisConn)) {
+		if (redisConn->set(accountIdStr, tokenStr, retval)) {
+			ret = true;
+		}
+	}
+	
+	return ret;
 }
 
 #else

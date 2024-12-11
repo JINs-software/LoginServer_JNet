@@ -93,11 +93,12 @@ private:
 	virtual void OnRecv(SessionID64 sessionID, JBuffer& recvBuff);
 
 #if defined(MOW_LOGIN_SERVER_MODE)
-	void Proc_REQ_Create_Account(SessionID64, const stMSG_REQ_CREATE_ACCOUNT&);
+	void Proc_REQ_Create_Account(SessionID64, stMSG_REQ_CREATE_ACCOUNT&);
 	void Send_RES_Create_Account(SessionID64, uint16 replyCode);
 
-	void Proc_REQ_Login(SessionID64, const stMSG_REQ_LOGIN&);
-	void Send_RES_Login(SessionID64, uint16 replyCode, const wstring& token);
+	void Proc_REQ_Login(SessionID64, stMSG_REQ_LOGIN&);
+	void Send_RES_Login(SessionID64, uint16 replyCode, WCHAR token[TOKEN_LENGTH]);
+	//void Send_RES_Login(SessionID64, uint16 replyCode, const wstring& token);
 	
 #else
 	/// @brief 로그인 요청 메시지 처리, (1) DB 조회 및 (2) 토큰 생성 그리고 (3) 토큰 전달 작업을 동기 방식으로 수행 (다수의 IOCP 작업자 스레드)
@@ -115,6 +116,7 @@ private:
 	bool InsertNewAccount(const wchar_t* accountID, const wchar_t* password);
 	bool GetAccountPassword(const wchar_t* accountID, wchar_t* password_out);
 
+	void GenerateRandomToken(wchar_t token[TOKEN_LENGTH]);
 	bool InsertSessionKeyToRedis(const wchar_t* accountID, const wchar_t* token);
 #else
 	// DB 접근

@@ -4,7 +4,7 @@
 using namespace jnet;
 using namespace std;
 
-#define ODBC_CONNECTION_STRING				L"Driver={MySQL ODBC 9.1 ANSI Driver};Server=127.0.0.1;User=root;Password=607281;Option=3;"
+#define ODBC_CONNECTION_STRING L"Driver={MySQL ODBC 9.1 ANSI Driver};Server=127.0.0.1;User=root;Password=607281;Option=3;"
 
 const WCHAR* Query_AccountId = L"SELECT accountId FROM mowaccountdb.account WHERE accountid = ?";
 const WCHAR* Query_AccountPassword = L"SELECT accountpassword FROM mowaccountdb.account WHERE accountid = ?";

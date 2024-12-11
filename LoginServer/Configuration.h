@@ -4,10 +4,10 @@
 * 'MarchOfWind' GameServer or Dummy Test Mode
 ************************************************/
 #define MOW_LOGIN_SERVER_MODE
-#define MOW_TEST
+//#define MOW_TEST
 
 //#define ASSERT
-#define CONNECT_TO_MONITORING_SERVER
+//#define CONNECT_TO_MONITORING_SERVER
 //#define	CONNECT_TIMEOUT_CHECK_SET
 //#define DELEY_TIME_CHECK
 
